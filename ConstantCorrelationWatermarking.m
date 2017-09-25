@@ -29,7 +29,7 @@ onescount=0;zeroscount=0;
 countzeromessage=0;countonemessage=0;
 overallTotalextracted=0;grandTotalEmbed=0;
 epsilon = 0.5;% Tolerance for overflow, underflow and unintentional attack
-for cnt = 1 : numel(dicomlist)-18
+for cnt = 1 : numel(dicomlist)
     dicom=strcat('DataSets/series2/',dicomlist(cnt).name);
     % cell2mat()
      info=dicominfo(dicom);% extract the metadata from the image
