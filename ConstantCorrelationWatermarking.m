@@ -1,17 +1,22 @@
-% Copyright, Eze P.U., Udaya P.
+% Copyright, Eze P.U., Udaya P. 2017.
 % Email: peze@student.unimelb.edu.au
 clear;
 clc;
 blocksize=8;
-desiredcorrelation= 8.2521;
+desiredcorrelation= 8.2521;% You can choose any value to experiment with
 
-goldcode=[];% Your goldcode generated from secret key goes here
-%READ IN YOUR SAMPLE DICOM IMAGES
+% [-1, 1, 1, -1, 1, -1, 1, 1
+goldcode=[Your 8x8 goldcode goes here];
+
+
+
+
+
 dicomlist = dir(fullfile(pwd,'DataSets/series2/','*.dcm'));
 for cnt = 1 : numel(dicomlist)
     I{cnt} = dicomread(fullfile(pwd,'DataSets/series2/',dicomlist(cnt).name));  
 end
-
+% return;
 % =======DEFINE GLOBAL VARIABLES FO RUNNING THE SIMULATION=========
 withoutwatermark=[];
 zeroAlpha = [];
@@ -24,12 +29,13 @@ onescount=0;zeroscount=0;
 countzeromessage=0;countonemessage=0;
 overallTotalextracted=0;grandTotalEmbed=0;
 epsilon = 0.5;% Tolerance for overflow, underflow and unintentional attack
-for cnt = 1 : numel(dicomlist)
+for cnt = 1 : numel(dicomlist)-18
     dicom=strcat('DataSets/series2/',dicomlist(cnt).name);
-   
+    % cell2mat()
      info=dicominfo(dicom);% extract the metadata from the image
      metadata = info;
      im=dicomread(info);
+    %  im = I(1);
      pixeldepth=info.BitDepth;
     peakval=2^(pixeldepth);
      if length(size(im)) >2
@@ -38,13 +44,71 @@ for cnt = 1 : numel(dicomlist)
     [row,col]=size(im);
     im_uncast = im;%NOT cast from int16 to uint16
      im = uint16(im); % Necessary to ensure pixel values are not accepted at underflow and overflow values
-   
+    
 
     block=im(1:8,1:8);
     [N, M]=size(block);
     message=round(rand(row/8,col/8));% Experimental message from random bits
 
-            % Modified (CONSTANT CORRELATION) criteria for extraction and tamper detection
+   
+    
+
+    %==========ESTIMATION OF LINEAR CORRELATION THRESHOLD AND RECOMMENDED ALPHA
+    % ========= CORRELATION CONSTANT FOR EACH BLOCK
+
+
+
+    i=1;j=1;
+    caption=strcat('Watermark Embedding and Extraction for:', dicom,'. Please wait...');
+    display(caption);
+    bitToEmbed=1;
+    finalstego = zeros(row,col);
+    modifiedcover = zeros(row,col);
+    totalmodifiedpixels=0;
+    none=0;
+    x=1;y=1;
+    errorbars =[];
+    ber=0; % error bits
+    falsenegative =0;
+    while i<row
+        while j<col
+            block=im(i:i+7,j:j+7);
+            withoutwatermark=[withoutwatermark linearCorrelation(block,goldcode)];
+            bitToEmbed=message(x,y);
+
+            alpha=computeAlpha(block,desiredcorrelation,bitToEmbed,goldcode);
+
+    %             alpha=desiredcorrelation;
+            %==== HISTOGRAM EQUALIZATION TO OVERCOME OVERFLOW AND UNDERFLOW
+            [modpixels,block]=HistogramEqualize(block,pixeldepth,alpha);%Equalise histogram to remove underflow and overflow
+            modifiedcover(i:i+7,j:j+7)=block;
+            totalmodifiedpixels=totalmodifiedpixels + modpixels;
+    %         alpha=computeAlpha(block,desiredcorrelation,bitToEmbed,goldcode);
+            %================Ends Here===================%
+            zeroAlpha=[zeroAlpha alpha];
+            watermark=(alpha.*goldcode);
+            if (bitToEmbed==0) % Embed 0-bit according to our paper
+                stego=(double(block)+ watermark);
+                countzeromessage=countzeromessage+1;
+            else
+                stego=(double(block)- watermark);% Embed 1-bit according to our paper
+               countonemessage=countonemessage+1;
+            end
+
+            SSM = ssim(uint16(stego),block);% more than 8-bit depth
+            PSN = psnr(uint16(stego),block,peakval);
+    %         PSN = psnr(uint8(stego),block);
+    %         SSM = ssim(uint8(stego),block);
+            ssm0=[ssm0 SSM];psn0=[psn0 PSN];
+    %         normalisedstego = (uint16(stego) - mean2(uint16(stego)))/std2(uint16(stego))
+            corr0=linearCorrelation(uint16(stego),goldcode);
+    %         corr0=linearCorrelation(uint8(stego),goldcode);
+            finalstego(i:i+7,j:j+7)=stego;
+            extractzerocorrelation= [extractzerocorrelation corr0];
+            errorbars =[errorbars abs(corr0)-desiredcorrelation];
+    
+
+            % Modified criteria for extraction and tamper detection
             if corr0 < (-desiredcorrelation + epsilon) && (corr0 > -desiredcorrelation - epsilon) % corr = -p+-0.5
                 extractedwatermark=[extractedwatermark bitToEmbed];
                 onescount=onescount+1; 
@@ -64,6 +128,7 @@ for cnt = 1 : numel(dicomlist)
                 finalstego(i:i+7,j:j+7)=2^(pixeldepth)-1; % Flagging potentially tampered blocks
             end
 
+
             % Increment to next bit in message matrix
             y=y+1;
             if y>(col/N)
@@ -73,7 +138,7 @@ for cnt = 1 : numel(dicomlist)
             if x>(row/M)
                 x=1;
             end
-    %     
+   
             j=j+8;%Go to next column
         end
         j=1;
@@ -106,13 +171,13 @@ bervalue
 berOverall
 % Overall unwatermarked statistics
  meanTg = mean(withoutwatermark)% Mean Correlation without embedded data
-
+%
  variancethreshold=var(withoutwatermark);
  standarddev= std(withoutwatermark);
  recommendedConstantCorrelation=meanTg+standarddev; % use this as p
 
 
-%==============PLOTS===========================================
+
 figure
 plot(zeroAlpha,psn0,'*')
 xlabel('Embedding Strength,a')
@@ -140,6 +205,7 @@ xlabel('Linear Correlation')
 ylabel('Number of Image Blocks')
 grid on
 grid minor
+
 
 
 figure
@@ -226,5 +292,7 @@ subplot(2,2,4)
 imhist(uint16(finalstego))
 caption=strcat('Histogram of Stego Image at p=',num2str(desiredcorrelation));
 title(caption)
+
+
 
 
